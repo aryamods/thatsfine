@@ -34,28 +34,49 @@ MODEL_PATH = "skin_model.h5"
 GDRIVE_FILE_ID = "1Tm1OpVsGDvGtCHNaq4xu_DVNzjCSZO3X"
 
 def download_model_from_gdrive(file_id: str, dest_path: str):
-    """Download file dari Google Drive menggunakan gdown (support file besar & bypass virus scan)."""
-    import gdown  # pip install gdown
-    logging.info(f"Model tidak ditemukan di '{dest_path}', mengunduh dari Google Drive...")
+    """Download file dari Google Drive menggunakan gdown dengan fuzzy mode."""
+    import gdown
+    logging.info(f"Mengunduh model dari Google Drive ke '{dest_path}'...")
+    # fuzzy=True handles various Google Drive URL formats & quota warnings
     url = f"https://drive.google.com/uc?id={file_id}"
-    gdown.download(url, dest_path, quiet=False)
+    gdown.download(url, dest_path, quiet=False, fuzzy=True)
     size_mb = os.path.getsize(dest_path) / (1024 * 1024)
     logging.info(f"Model berhasil diunduh ke '{dest_path}' ({size_mb:.1f} MB)")
 
-if not os.path.exists(MODEL_PATH):
-    download_model_from_gdrive(GDRIVE_FILE_ID, MODEL_PATH)
-else:
-    logging.info(f"Model ditemukan secara lokal: '{MODEL_PATH}'")
+def verify_and_load_model(model_path: str, file_id: str):
+    """Verifikasi file HDF5 valid, re-download jika corrupt, lalu load model."""
+    import h5py
+    # Download jika belum ada
+    if not os.path.exists(model_path):
+        download_model_from_gdrive(file_id, model_path)
 
-# Validasi ukuran file — pastikan bukan HTML error page (hasil download gagal)
-model_size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
-if model_size_mb < 1.0:
-    logging.error(f"File model terlalu kecil ({model_size_mb:.2f} MB) — kemungkinan download gagal. Menghapus dan mencoba ulang...")
-    os.remove(MODEL_PATH)
-    download_model_from_gdrive(GDRIVE_FILE_ID, MODEL_PATH)
+    # Validasi file: cek signature HDF5
+    valid = False
+    if os.path.exists(model_path):
+        size_mb = os.path.getsize(model_path) / (1024 * 1024)
+        if size_mb > 10:
+            try:
+                with h5py.File(model_path, "r") as f:
+                    valid = True
+                    logging.info(f"File HDF5 valid ({size_mb:.1f} MB)")
+            except Exception as e:
+                logging.error(f"File corrupt/bukan HDF5: {e}")
+        else:
+            logging.error(f"File terlalu kecil: {size_mb:.1f} MB")
+
+    # Re-download jika tidak valid
+    if not valid:
+        logging.warning("Menghapus file corrupt dan mengunduh ulang...")
+        if os.path.exists(model_path):
+            os.remove(model_path)
+        download_model_from_gdrive(file_id, model_path)
+
+    # Load model
+    logging.info("Loading model...")
+    return tf.keras.models.load_model(model_path)
 
 # Load model klasifikasi kulit dan label
-model = tf.keras.models.load_model(MODEL_PATH)
+model = verify_and_load_model(MODEL_PATH, GDRIVE_FILE_ID)
 labels = ["Acne", "Dry", "Normal", "Oily"]
 
 # Simpan gambar terakhir yang dianalisis (key: session_id atau "latest")

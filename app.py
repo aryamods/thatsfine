@@ -37,41 +37,61 @@ def download_model_from_gdrive(file_id: str, dest_path: str):
     """Download file dari Google Drive menggunakan gdown dengan fuzzy mode."""
     import gdown
     logging.info(f"Mengunduh model dari Google Drive ke '{dest_path}'...")
-    # fuzzy=True handles various Google Drive URL formats & quota warnings
     url = f"https://drive.google.com/uc?id={file_id}"
-    gdown.download(url, dest_path, quiet=False, fuzzy=True)
+    # use_cookies=False bypasses Google's virus-scan HTML confirmation page
+    # which can cause gdown to save an HTML file instead of the actual model
+    result = gdown.download(url, dest_path, quiet=False, fuzzy=True, use_cookies=False)
+    if result is None:
+        raise RuntimeError(
+            "gdown gagal mengunduh file. Pastikan file bersifat publik "
+            "dan Google Drive quota belum habis."
+        )
     size_mb = os.path.getsize(dest_path) / (1024 * 1024)
     logging.info(f"Model berhasil diunduh ke '{dest_path}' ({size_mb:.1f} MB)")
 
-def verify_and_load_model(model_path: str, file_id: str):
-    """Verifikasi file HDF5 valid, re-download jika corrupt, lalu load model."""
+def verify_and_load_model(model_path: str, file_id: str, max_retries: int = 3):
+    """Verifikasi file HDF5 valid, re-download jika corrupt, lalu load model.
+    max_retries mencegah loop tak terbatas jika Google Drive terus mengembalikan HTML."""
     import h5py
-    # Download jika belum ada
-    if not os.path.exists(model_path):
-        download_model_from_gdrive(file_id, model_path)
 
-    # Validasi file: cek signature HDF5
-    valid = False
-    if os.path.exists(model_path):
-        size_mb = os.path.getsize(model_path) / (1024 * 1024)
-        if size_mb > 10:
-            try:
-                with h5py.File(model_path, "r") as f:
-                    valid = True
-                    logging.info(f"File HDF5 valid ({size_mb:.1f} MB)")
-            except Exception as e:
-                logging.error(f"File corrupt/bukan HDF5: {e}")
-        else:
-            logging.error(f"File terlalu kecil: {size_mb:.1f} MB")
+    for attempt in range(max_retries):
+        if not os.path.exists(model_path):
+            download_model_from_gdrive(file_id, model_path)
 
-    # Re-download jika tidak valid
-    if not valid:
-        logging.warning("Menghapus file corrupt dan mengunduh ulang...")
+        valid = False
+        if os.path.exists(model_path):
+            size_mb = os.path.getsize(model_path) / (1024 * 1024)
+            if size_mb > 10:
+                try:
+                    with h5py.File(model_path, "r") as f:
+                        valid = True
+                        logging.info(f"File HDF5 valid ({size_mb:.1f} MB)")
+                except Exception as e:
+                    logging.error(f"File corrupt/bukan HDF5: {e}")
+            else:
+                logging.error(f"File terlalu kecil ({size_mb:.1f} MB) — kemungkinan HTML bukan model")
+
+        if valid:
+            break
+
+        logging.warning(f"Percobaan {attempt + 1}/{max_retries}: menghapus file corrupt dan mengunduh ulang...")
         if os.path.exists(model_path):
             os.remove(model_path)
-        download_model_from_gdrive(file_id, model_path)
 
-    # Load model
+        if attempt == max_retries - 1:
+            raise RuntimeError(
+                f"Model gagal dimuat setelah {max_retries} percobaan. "
+                "Kemungkinan penyebab:
+"
+                "  1. Google Drive download quota habis
+"
+                "  2. File tidak bersifat publik
+"
+                "  3. ID file salah
+"
+                "Solusi: gunakan Railway Volume atau Hugging Face Hub untuk hosting model."
+            )
+
     logging.info("Loading model...")
     return tf.keras.models.load_model(model_path)
 

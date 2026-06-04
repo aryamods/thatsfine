@@ -81,15 +81,8 @@ def verify_and_load_model(model_path: str, file_id: str, max_retries: int = 3):
         if attempt == max_retries - 1:
             raise RuntimeError(
                 f"Model gagal dimuat setelah {max_retries} percobaan. "
-                "Kemungkinan penyebab:
-"
-                "  1. Google Drive download quota habis
-"
-                "  2. File tidak bersifat publik
-"
-                "  3. ID file salah
-"
-                "Solusi: gunakan Railway Volume atau Hugging Face Hub untuk hosting model."
+                "Kemungkinan: (1) GDrive quota habis, (2) file tidak publik, (3) ID salah. "
+                "Solusi: gunakan Railway Volume atau Hugging Face Hub."
             )
 
     logging.info("Loading model...")

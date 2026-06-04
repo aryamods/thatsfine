@@ -34,17 +34,15 @@ MODEL_PATH = "skin_model.h5"
 GDRIVE_FILE_ID = "1Tm1OpVsGDvGtCHNaq4xu_DVNzjCSZO3X"
 
 def download_model_from_gdrive(file_id: str, dest_path: str):
-    """Download file dari Google Drive menggunakan gdown dengan fuzzy mode."""
+    """Download file dari Google Drive — hanya dipakai sebagai fallback lokal.
+    Di production (Railway), model sudah di-bake ke Docker image saat build time."""
     import gdown
     logging.info(f"Mengunduh model dari Google Drive ke '{dest_path}'...")
     url = f"https://drive.google.com/uc?id={file_id}"
-    # use_cookies=False bypasses Google's virus-scan HTML confirmation page
-    # which can cause gdown to save an HTML file instead of the actual model
     result = gdown.download(url, dest_path, quiet=False, fuzzy=True, use_cookies=False)
     if result is None:
         raise RuntimeError(
-            "gdown gagal mengunduh file. Pastikan file bersifat publik "
-            "dan Google Drive quota belum habis."
+            "gdown gagal. Model seharusnya sudah ada di image (di-download saat docker build)."
         )
     size_mb = os.path.getsize(dest_path) / (1024 * 1024)
     logging.info(f"Model berhasil diunduh ke '{dest_path}' ({size_mb:.1f} MB)")

@@ -34,60 +34,28 @@ MODEL_PATH = "skin_model.h5"
 GDRIVE_FILE_ID = "1Tm1OpVsGDvGtCHNaq4xu_DVNzjCSZO3X"
 
 def download_model_from_gdrive(file_id: str, dest_path: str):
-    """Download file dari Google Drive — hanya dipakai sebagai fallback lokal.
-    Di production (Railway), model sudah di-bake ke Docker image saat build time."""
-    import gdown
-    logging.info(f"Mengunduh model dari Google Drive ke '{dest_path}'...")
+    """Download file dari Google Drive menggunakan gdown (support file besar & bypass virus scan)."""
+    import gdown  # pip install gdown
+    logging.info(f"Model tidak ditemukan di '{dest_path}', mengunduh dari Google Drive...")
     url = f"https://drive.google.com/uc?id={file_id}"
-    result = gdown.download(url, dest_path, quiet=False, fuzzy=True, use_cookies=False)
-    if result is None:
-        raise RuntimeError(
-            "gdown gagal. Model seharusnya sudah ada di image (di-download saat docker build)."
-        )
+    gdown.download(url, dest_path, quiet=False)
     size_mb = os.path.getsize(dest_path) / (1024 * 1024)
     logging.info(f"Model berhasil diunduh ke '{dest_path}' ({size_mb:.1f} MB)")
 
-def verify_and_load_model(model_path: str, file_id: str, max_retries: int = 3):
-    """Verifikasi file HDF5 valid, re-download jika corrupt, lalu load model.
-    max_retries mencegah loop tak terbatas jika Google Drive terus mengembalikan HTML."""
-    import h5py
+if not os.path.exists(MODEL_PATH):
+    download_model_from_gdrive(GDRIVE_FILE_ID, MODEL_PATH)
+else:
+    logging.info(f"Model ditemukan secara lokal: '{MODEL_PATH}'")
 
-    for attempt in range(max_retries):
-        if not os.path.exists(model_path):
-            download_model_from_gdrive(file_id, model_path)
-
-        valid = False
-        if os.path.exists(model_path):
-            size_mb = os.path.getsize(model_path) / (1024 * 1024)
-            if size_mb > 10:
-                try:
-                    with h5py.File(model_path, "r") as f:
-                        valid = True
-                        logging.info(f"File HDF5 valid ({size_mb:.1f} MB)")
-                except Exception as e:
-                    logging.error(f"File corrupt/bukan HDF5: {e}")
-            else:
-                logging.error(f"File terlalu kecil ({size_mb:.1f} MB) — kemungkinan HTML bukan model")
-
-        if valid:
-            break
-
-        logging.warning(f"Percobaan {attempt + 1}/{max_retries}: menghapus file corrupt dan mengunduh ulang...")
-        if os.path.exists(model_path):
-            os.remove(model_path)
-
-        if attempt == max_retries - 1:
-            raise RuntimeError(
-                f"Model gagal dimuat setelah {max_retries} percobaan. "
-                "Kemungkinan: (1) GDrive quota habis, (2) file tidak publik, (3) ID salah. "
-                "Solusi: gunakan Railway Volume atau Hugging Face Hub."
-            )
-
-    logging.info("Loading model...")
-    return tf.keras.models.load_model(model_path)
+# Validasi ukuran file — pastikan bukan HTML error page (hasil download gagal)
+model_size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
+if model_size_mb < 1.0:
+    logging.error(f"File model terlalu kecil ({model_size_mb:.2f} MB) — kemungkinan download gagal. Menghapus dan mencoba ulang...")
+    os.remove(MODEL_PATH)
+    download_model_from_gdrive(GDRIVE_FILE_ID, MODEL_PATH)
 
 # Load model klasifikasi kulit dan label
-model = verify_and_load_model(MODEL_PATH, GDRIVE_FILE_ID)
+model = tf.keras.models.load_model(MODEL_PATH)
 labels = ["Acne", "Dry", "Normal", "Oily"]
 
 # Simpan gambar terakhir yang dianalisis (key: session_id atau "latest")
@@ -1479,5 +1447,4 @@ async def generate_pdf(
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="127.0.0.1", port=8001)
